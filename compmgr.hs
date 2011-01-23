@@ -26,7 +26,7 @@ import Graphics.X11.Xlib.Extras
 import Graphics.X11.Xlib.Event
 
 data Win = Win {  window :: Window
-                , damage :: Damage
+                , damage :: Maybe Damage
                 , damaged :: Bool
                } deriving (Show, Eq)
 
@@ -48,8 +48,11 @@ handleDamage display winlist e = do
     if isNothing maybewin then return winlist
         else do
             let win = fromJust maybewin
-            xdamageSubtract display (damage win) nullPtr nullPtr
-            return $ updateWin winlist $ win { damaged=True }
+            let maybedamage = damage win
+            if isNothing maybedamage then return winlist
+                else do
+                    xdamageSubtract display (fromJust maybedamage) nullPtr nullPtr
+                    return $ updateWin winlist $ win { damaged=True }
 
 eventHandler :: Display -> [Win] -> CInt -> Window -> EventType -> XEventPtr -> IO [Win]
 eventHandler display winlist damage_ver event_win evtype e
@@ -72,7 +75,7 @@ eventLoop display winlist damage_ver e = do
     nextEvent display e
     evtype <- get_EventType e
     event_win <- get_Window e
-    when ((show event_win) == "170") $
+    when ((show event_win) /= "176") $ -- root window
         print $ (evtypeToString evtype) ++ " event on window " ++ (show event_win) 
         
     eventHandler display winlist damage_ver event_win evtype e
@@ -90,6 +93,7 @@ eventLoop display winlist damage_ver e = do
             | evtype == fromIntegral damage_ver = "Damage"
             | otherwise = "Unknown (" ++ (show evtype) ++ ")"
 
+
 addWin :: Display -> [Win] -> Window -> IO [Win]
 addWin display winlist win = do
     if isJust $ findWin winlist win then do
@@ -97,10 +101,14 @@ addWin display winlist win = do
         else do
         alloca $ \wa -> do
             status <- xGetWindowAttributes display win wa
-            attrs <- peek wa
             if status == 0 then return winlist
                 else do
-                damage <- xdamageCreate display win 3 -- XDamageReportNonEmpty = 3 
+                attrs <- peek wa
+                damage <- if wa_class attrs == inputOutput then do
+                    d <- xdamageCreate display win 3 -- XDamageReportNonEmpty = 3 
+                    return $ Just d
+                    else
+                    return Nothing
                 name <- fetchName display win
                 return $ winlist ++ [Win {window=win, damage=damage, damaged=False}]
 
