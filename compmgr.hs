@@ -46,53 +46,34 @@ updateWin winlist win = [win] ++ (filter (\x -> x /= win) winlist)
 delWin :: [Win] -> Win -> [Win]
 delWin winlist win = delete win winlist
 
-handleCreate :: Display -> [Win] -> Window -> IO [Win]
-handleCreate = addWin
-
-handleDestroy :: Display -> [Win] -> Window -> IO [Win]
-handleDestroy display winlist event_win = do
-    if isNothing maybewin then return winlist
-        else do 
-            when (isJust maybedamage) $ do
-                xdamageDestroy display damage
-            return $ delWin winlist win
-    where
-        maybewin = findWin winlist event_win
-        win = fromJust maybewin
-        maybedamage = win_damage win
-        damage = fromJust maybedamage
-
-handleDamage :: Display -> [Win] -> Window -> IO [Win]
-handleDamage display winlist event_win = do
-    if isNothing maybewindamage then return winlist
-        else do
-            xdamageSubtract display (snd windamage) nullPtr nullPtr
-            return $ updateWin winlist $ (fst windamage) { win_damaged=True }
-    where
-        maybewindamage = do 
-            win <- findWin winlist event_win
-            damage <- win_damage win
-            return (win, damage)
-        windamage = fromJust maybewindamage
-
 
 eventHandler :: Display -> [Win] -> CInt -> Event -> IO [Win]
 eventHandler display winlist damage_ver ev
-    | evtype == createNotify = handleCreate display winlist event_win
+    | evtype == createNotify = addWin display winlist event_win
     | evtype == configureNotify = defaultHandler
-    | evtype == destroyNotify = defaultHandler
+    | evtype == destroyNotify && isJust maybewin = do
+            when (isJust maybedamage) $ do
+                xdamageDestroy display damage
+            return $ delWin winlist win
     | evtype == mapNotify = defaultHandler
     | evtype == unmapNotify = defaultHandler
     | evtype == reparentNotify = defaultHandler
     | evtype == circulateNotify =  defaultHandler
     | evtype == expose = defaultHandler
     | evtype == propertyNotify = defaultHandler
-    | evtype == fromIntegral damage_ver = handleDamage display winlist event_win
+    | evtype == (fromIntegral damage_ver) && isJust maybewin && isJust maybedamage = do
+            xdamageSubtract display damage nullPtr nullPtr
+            return $ updateWin winlist $ win { win_damaged=True }
     | otherwise = defaultHandler
     where
         defaultHandler = return winlist
         evtype = ev_event_type ev
         event_win = ev_window ev
+        maybewin = findWin winlist event_win
+        win = fromJust maybewin
+        maybedamage = win_damage win
+        damage = fromJust maybedamage
+
 
 
 eventLoop :: Display -> [Win] -> CInt -> XEventPtr -> IO [Win]
