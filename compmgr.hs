@@ -10,6 +10,7 @@
 
 import Data.Bits
 import Data.Maybe
+import Data.List ( delete )
 import Control.Monad
 import Foreign.C.Types( CInt )
 import Foreign.Ptr
@@ -25,39 +26,59 @@ import Graphics.X11.Xlib.Misc
 import Graphics.X11.Xlib.Extras
 import Graphics.X11.Xlib.Event
 
-data Win = Win {  window :: Window
-                , damage :: Maybe Damage
-                , damaged :: Bool
+data Win = Win {  win_window :: Window
+                , win_damage :: Maybe Damage
+                , win_damaged :: Bool
                } deriving (Show, Eq)
 
 -- Find a Win in winlist by its corresponding X window
 findWin :: [Win] -> Window -> Maybe Win
 findWin winlist win 
     | null matched = Nothing
-    | otherwise = Just $ head matched
-    where matched = filter (\x -> window x == win) winlist
+    | otherwise = Just $ head matched -- there should never be more than one match
+    where matched = filter (\x -> win_window x == win) winlist
 
 -- Replace a Win in winlist with an updated version
 updateWin :: [Win] -> Win -> [Win]
 updateWin winlist win = [win] ++ (filter (\x -> x /= win) winlist)
+
+-- Remove a Win from the winlist
+delWin :: [Win] -> Win -> [Win]
+delWin winlist win = delete win winlist
+
+handleCreate :: Display -> [Win] -> Window -> IO [Win]
+handleCreate = addWin
+
+handleDestroy :: Display -> [Win] -> Window -> IO [Win]
+handleDestroy display winlist event_win = do
+    if isNothing maybewin then return winlist
+        else do 
+            when (isJust maybedamage) $ do
+                xdamageDestroy display damage
+            return $ delWin winlist win
+    where
+        maybewin = findWin winlist event_win
+        win = fromJust maybewin
+        maybedamage = win_damage win
+        damage = fromJust maybedamage
 
 handleDamage :: Display -> [Win] -> Window -> IO [Win]
 handleDamage display winlist event_win = do
     if isNothing maybewindamage then return winlist
         else do
             xdamageSubtract display (snd windamage) nullPtr nullPtr
-            return $ updateWin winlist $ (fst windamage) { damaged=True }
+            return $ updateWin winlist $ (fst windamage) { win_damaged=True }
     where
         maybewindamage = do 
-            win <- findWin winlist $ event_win
-            damage <- damage win
+            win <- findWin winlist event_win
+            damage <- win_damage win
             return (win, damage)
         windamage = fromJust maybewindamage
 
 
 eventHandler :: Display -> [Win] -> CInt -> Event -> IO [Win]
 eventHandler display winlist damage_ver ev
-    | evtype == createNotify = addWin display winlist event_win
+    | evtype == createNotify = handleCreate display winlist event_win
     | evtype == configureNotify = defaultHandler
     | evtype == destroyNotify = defaultHandler
     | evtype == mapNotify = defaultHandler
@@ -72,6 +93,7 @@ eventHandler display winlist damage_ver ev
         defaultHandler = return winlist
         evtype = ev_event_type ev
         event_win = ev_window ev
+
 
 eventLoop :: Display -> [Win] -> CInt -> XEventPtr -> IO [Win]
 eventLoop display winlist damage_ver e = do
@@ -108,7 +130,7 @@ addWin display winlist win =
             damage <- if wa_class attrs /= inputOutput then return Nothing
                       else do d <- xdamageCreate display win 3; return $ Just d
             name <- fetchName display win
-            return $ winlist ++ [Win {window=win, damage=damage, damaged=False}]
+            return $ winlist ++ [Win {win_window=win, win_damage=damage, win_damaged=False}]
 
 main :: IO ()
 main = do
