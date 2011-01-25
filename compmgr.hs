@@ -1,6 +1,14 @@
-
-
-
+----------------------------------------------------------------------------
+-- |
+-- Module      :  compmgr
+-- Copyright   :  (c) Aren Olson 2011
+-- License     :  BSD3 (see LICENSE)
+--
+-- Maintainer  :  Aren Olson <reacocard@gmail.com>
+-- Stability   :  unstable
+-- Portability :  not portable, uses X11, posix
+--
+-----------------------------------------------------------------------------
 
 
 import Data.Bits
@@ -45,7 +53,8 @@ findWin winlist win = find (\x -> win_window x == win) winlist
 
 -- Replace a Win in winlist with an updated version
 updateWin :: [Win] -> Win -> [Win]
-updateWin winlist win = [win] ++ (filter (\x -> win_window x /= win_window win) winlist)
+updateWin winlist win = [win] ++ 
+    filter (\x -> win_window x /= win_window win) winlist
 
 -- Remove a Win from the winlist
 delWin :: [Win] -> Win -> [Win]
@@ -118,36 +127,32 @@ main = do
     rootwin     <- rootWindow display screen
     damage      <- xdamageQueryExtension display
     composite   <- xcompositeQueryExtension display
-    if isNothing damage 
+    if isNothing $ do damage; composite;
         then do
-            print "XDamage extension not available, exiting."
+            print "A required extension is not available, exiting."
             return ()
         else do
             let damage_ver = fst $ fromJust damage
                 damage_err = snd $ fromJust damage
 
-            print $ "DamageVer: " ++ (show damage_ver)
-
             selectInput display rootwin  $  substructureNotifyMask
                                         .|. exposureMask
                                         .|. structureNotifyMask 
                                         .|. propertyChangeMask
-
             sync display False
             xSetErrorHandler
-
             hSetBuffering stdout NoBuffering
-
-            print $ "RootWin: " ++ show rootwin
 
             grabServer display
             winlist <- do
                 window_query <- queryTree display rootwin
                 maybewins    <- mapM (winFromWindow display) (third window_query)
-                return $ map fromJust $ filter isJust maybewins
+                return $ catMaybes maybewins
             ungrabServer display
-            print $ "Winlist: " ++ show winlist
 
+            print $ "DamageVer: "   ++ show damage_ver
+            print $ "RootWin: "     ++ show rootwin
+            print $ "Winlist: "     ++ show winlist
 
             allocaXEvent $ \e -> do
                 let mainloop = \wlist evptr -> do
@@ -157,5 +162,4 @@ main = do
     
     where
         third (_,_,x) = x 
-
 
