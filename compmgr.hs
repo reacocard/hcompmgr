@@ -25,6 +25,7 @@ import Graphics.X11.Xlib
 import Graphics.X11.Xlib.Extras
 import Graphics.X11.Xdamage
 import Graphics.X11.Xcomposite
+import GLX
 
 data Win =  Win { win_window    :: Window
                 , win_damage    :: Maybe Damage
