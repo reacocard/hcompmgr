@@ -26,11 +26,18 @@ import Graphics.X11.Xlib.Extras
 import Graphics.X11.Xdamage
 import Graphics.X11.Xcomposite
 
-data Win = Win {  win_window    :: Window
+data Win =  Win { win_window    :: Window
                 , win_damage    :: Maybe Damage
                 , win_damaged   :: Bool
-               } deriving (Show, Eq)
+                , win_pixmap    :: Maybe Pixmap
+                } deriving (Show, Eq)
 
+defaultsWin :: Win
+defaultsWin =   Win { win_window    = -1        -- invalid, must be overridden
+                    , win_damage    = Nothing
+                    , win_damaged   = False
+                    , win_pixmap    = Nothing
+                    }
 
 -- translate an EventType to a human-readable name
 evtypeToString :: EventType -> EventType -> String
@@ -66,22 +73,22 @@ addWin winlist win = winlist ++ [win]
 winFromWindow :: Display -> Window -> IO (Maybe Win)
 winFromWindow display win = alloca $ \wa -> do
     status <- xGetWindowAttributes display win wa
-    if status == 0 
-        then return Nothing
-        else do
+    case status of
+        0 -> return Nothing
+        _ -> do
             attrs  <- peek wa
             damage <- if wa_class attrs /= inputOutput 
                         then return Nothing
                         else do d <- xdamageCreate display win 3; return $ Just d
-            return $ Just $ Win {win_window=win, win_damage=damage, win_damaged=False}
+            return $ Just $ defaultsWin {win_window=win, win_damage=damage}
 
 eventHandler :: Display -> [Win] -> EventType -> Event -> IO [Win]
 eventHandler display winlist damageNotify ev
     | evtype == createNotify && isNothing maybewin = do
             window <- winFromWindow display event_win
-            if isNothing window 
-                then return winlist 
-                else return $ addWin winlist $ fromJust window
+            case window of
+                Nothing -> return winlist
+                Just w  -> return $ addWin winlist w
 
     | evtype == destroyNotify && isJust maybewin = do
             when (isJust maybedamage) $ xdamageDestroy display damage
@@ -129,12 +136,11 @@ main = do
     rootwin     <- rootWindow display screen
     damage      <- xdamageQueryExtension display
     composite   <- xcompositeQueryExtension display
-    if isNothing $ do damage; composite;
-        then do
-            print "A required extension is not available, exiting."
-            return ()
-        else do
-            let damageNotify = fromIntegral $ fst $ fromJust damage :: EventType
+    case (damage, composite) of
+        (Nothing , _        ) -> do print "Damage extension missing."; return ();
+        (_       , Nothing  ) -> do print "Composite extension missing."; return ();
+        (Just dam, Just comp) -> do
+            let damageNotify = fromIntegral $ fst dam :: EventType
 
             selectInput display rootwin  $  substructureNotifyMask
                                         .|. exposureMask
@@ -156,7 +162,7 @@ main = do
             print $ "Winlist: "     ++ show winlist
 
             allocaXEvent $ \e -> do 
-                _ <- eventLoop display winlist damageNotify e
+                eventLoop display winlist damageNotify e
                 return ()
     where
         third (_,_,x) = x 
