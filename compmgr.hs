@@ -15,17 +15,18 @@ import Data.Bits
 import Data.Maybe
 import Data.List ( find, delete )
 import Control.Monad
-import Foreign.Ptr( nullPtr )
 import Foreign.Marshal( alloca )
 import Foreign.Storable( peek )
 import System.IO
 
 import Graphics.X11.Types
-import Graphics.X11.Xlib
+import Graphics.X11.Xlib hiding (Region) -- we use xfixes' Region
 import Graphics.X11.Xlib.Extras
 import Graphics.X11.Xdamage
+import Graphics.X11.Xfixes
 import Graphics.X11.Xcomposite
-import GLX
+--import GLX
+
 
 data Win =  Win { win_window    :: Window
                 , win_damage    :: Maybe Damage
@@ -80,7 +81,8 @@ winFromWindow display win = alloca $ \wa -> do
             attrs  <- peek wa
             damage <- if wa_class attrs /= inputOutput 
                         then return Nothing
-                        else do d <- xdamageCreate display win 3; return $ Just d
+                        else do d <- xdamageCreate display win 3
+                                return $ Just d
             return $ Just $ defaultsWin {win_window=win, win_damage=damage}
 
 eventHandler :: Display -> [Win] -> EventType -> Event -> IO [Win]
@@ -96,7 +98,7 @@ eventHandler display winlist damageNotify ev
             return $ delWin winlist win
 
     | evtype == damageNotify && isJust maybewin && isJust maybedamage = do
-            xdamageSubtract display damage nullPtr nullPtr
+            xdamageSubtract display damage none none
             return $ updateWin winlist $ win { win_damaged=True }
 
     | otherwise = 
