@@ -3,158 +3,159 @@
 
 
 
--- open display
--- get screen
--- get root
--- query extensions?
-
 import Data.Bits
 import Data.Maybe
-import Data.List ( delete )
+import Data.List ( find, delete )
 import Control.Monad
 import Foreign.C.Types( CInt )
-import Foreign.Ptr
+import Foreign.Ptr( nullPtr )
 import Foreign.Marshal( alloca )
 import Foreign.Storable( peek )
 import System.IO
 
-import Graphics.X11.Xdamage
 import Graphics.X11.Types
-import Graphics.X11.Xlib.Types
-import Graphics.X11.Xlib.Display
-import Graphics.X11.Xlib.Misc
+import Graphics.X11.Xlib
 import Graphics.X11.Xlib.Extras
-import Graphics.X11.Xlib.Event
+import Graphics.X11.Xdamage
+import Graphics.X11.Xcomposite
 
-data Win = Win {  win_window :: Window
-                , win_damage :: Maybe Damage
-                , win_damaged :: Bool
+data Win = Win {  win_window    :: Window
+                , win_damage    :: Maybe Damage
+                , win_damaged   :: Bool
                } deriving (Show, Eq)
+
+
+-- translate an EventType to a human-readable name
+evtypeToString :: EventType -> String
+evtypeToString evtype
+    | evtype == createNotify            = "Create"
+    | evtype == configureNotify         = "Configure"
+    | evtype == destroyNotify           = "Destroy"
+    | evtype == mapNotify               = "Map"
+    | evtype == unmapNotify             = "Unmap"
+    | evtype == reparentNotify          = "Reparent"
+    | evtype == circulateNotify         = "Circulate"
+    | evtype == expose                  = "Expose"
+    | evtype == propertyNotify          = "Property"
+    | otherwise                         = "Unknown (" ++ (show evtype) ++ ")"
 
 -- Find a Win in winlist by its corresponding X window
 findWin :: [Win] -> Window -> Maybe Win
-findWin winlist win 
-    | null matched = Nothing
-    | otherwise = Just $ head matched -- there should never be more than one match
-    where matched = filter (\x -> win_window x == win) winlist
+findWin winlist win = find (\x -> win_window x == win) winlist
 
 -- Replace a Win in winlist with an updated version
 updateWin :: [Win] -> Win -> [Win]
-updateWin winlist win = [win] ++ (filter (\x -> x /= win) winlist)
+updateWin winlist win = [win] ++ (filter (\x -> win_window x /= win_window win) winlist)
 
 -- Remove a Win from the winlist
 delWin :: [Win] -> Win -> [Win]
 delWin winlist win = delete win winlist
 
+addWin :: [Win] -> Win -> [Win]
+addWin winlist win = winlist ++ [win]
+
+winFromWindow :: Display -> Window -> IO (Maybe Win)
+winFromWindow display win = alloca $ \wa -> do
+    status <- xGetWindowAttributes display win wa
+    if status == 0 
+        then return Nothing
+        else do
+            attrs  <- peek wa
+            damage <- if wa_class attrs /= inputOutput 
+                        then return Nothing
+                        else do d <- xdamageCreate display win 3; return $ Just d
+            return $ Just $ Win {win_window=win, win_damage=damage, win_damaged=False}
 
 eventHandler :: Display -> [Win] -> CInt -> Event -> IO [Win]
 eventHandler display winlist damage_ver ev
-    | evtype == createNotify = addWin display winlist event_win
-    | evtype == configureNotify = defaultHandler
+    | evtype == createNotify && isNothing maybewin = do
+            window <- winFromWindow display event_win
+            if isNothing window 
+                then return winlist 
+                else return $ addWin winlist $ fromJust window
+
     | evtype == destroyNotify && isJust maybewin = do
-            when (isJust maybedamage) $ do
-                xdamageDestroy display damage
+            when (isJust maybedamage) $ xdamageDestroy display damage
             return $ delWin winlist win
-    | evtype == mapNotify = defaultHandler
-    | evtype == unmapNotify = defaultHandler
-    | evtype == reparentNotify = defaultHandler
-    | evtype == circulateNotify =  defaultHandler
-    | evtype == expose = defaultHandler
-    | evtype == propertyNotify = defaultHandler
+
     | evtype == (fromIntegral damage_ver) && isJust maybewin && isJust maybedamage = do
             xdamageSubtract display damage nullPtr nullPtr
             return $ updateWin winlist $ win { win_damaged=True }
-    | otherwise = defaultHandler
+
+    | otherwise = 
+            return winlist
+
     where
-        defaultHandler = return winlist
-        evtype = ev_event_type ev
-        event_win = ev_window ev
-        maybewin = findWin winlist event_win
-        win = fromJust maybewin
+        evtype      = ev_event_type ev
+        event_win   = ev_window ev
+        maybewin    = findWin winlist event_win
+        win         = fromJust maybewin
         maybedamage = win_damage win
-        damage = fromJust maybedamage
+        damage      = fromJust maybedamage
 
-
+printEventDebug :: Event -> CInt -> IO ()
+printEventDebug event damage_ver
+    | (evwin /= 176 && evwin /= 62914566) || evtype /= (fromIntegral damage_ver) =
+        print $ (evtypeToString evtype) ++ " event on window " ++ (show evwin)
+    | otherwise =
+        return ()
+    where
+        evtype  = ev_event_type event
+        evwin   = ev_window     event
 
 eventLoop :: Display -> [Win] -> CInt -> XEventPtr -> IO [Win]
 eventLoop display winlist damage_ver e = do
     nextEvent display e
     ev <- getEvent e
-    let evtype = ev_event_type ev
-        event_win = ev_window ev
-    when (((event_win /= 176) && (event_win /= 62914566)) || (evtype /= (fromIntegral damage_ver))) $
-        print $ (evtypeToString evtype) ++ " event on window " ++ (show event_win) 
+    printEventDebug ev damage_ver
     eventHandler display winlist damage_ver ev
-    where
-        evtypeToString evtype
-            | evtype == createNotify = "Create"
-            | evtype == configureNotify = "Configure"
-            | evtype == destroyNotify = "Destroy"
-            | evtype == mapNotify = "Map"
-            | evtype == unmapNotify = "Unmap"
-            | evtype == reparentNotify = "Reparent"
-            | evtype == circulateNotify = "Circulate"
-            | evtype == expose = "Expose"
-            | evtype == propertyNotify = "Property"
-            | evtype == fromIntegral damage_ver = "Damage"
-            | otherwise = "Unknown (" ++ (show evtype) ++ ")"
 
-
-addWin :: Display -> [Win] -> Window -> IO [Win]
-addWin display winlist win =
-    if isJust $ findWin winlist win then return winlist
-    else alloca $ \wa -> do
-        status <- xGetWindowAttributes display win wa
-        if status == 0 then return winlist
-            else do
-            attrs <- peek wa
-            damage <- if wa_class attrs /= inputOutput then return Nothing
-                      else do d <- xdamageCreate display win 3; return $ Just d
-            name <- fetchName display win
-            return $ winlist ++ [Win {win_window=win, win_damage=damage, win_damaged=False}]
 
 main :: IO ()
 main = do
-    display <- openDisplay ""
-    let screen = defaultScreen display
-    rootwin <- rootWindow display screen
-    damage <- xdamageQueryExtension display
-    if isNothing damage then do
-        print "XDamage extension not available, exiting."
-        return ()
+    display     <- openDisplay ""
+    screen      <- return $ defaultScreen display
+    rootwin     <- rootWindow display screen
+    damage      <- xdamageQueryExtension display
+    composite   <- xcompositeQueryExtension display
+    if isNothing damage 
+        then do
+            print "XDamage extension not available, exiting."
+            return ()
         else do
-        let damage_ver = fst $ fromJust damage
-            damage_err = snd $ fromJust damage
+            let damage_ver = fst $ fromJust damage
+                damage_err = snd $ fromJust damage
 
-        print $ "DamageVer: " ++ (show damage_ver)
+            print $ "DamageVer: " ++ (show damage_ver)
 
-        selectInput display rootwin  $  substructureNotifyMask
-                                    .|. exposureMask
-                                    .|. structureNotifyMask 
-                                    .|. propertyChangeMask
+            selectInput display rootwin  $  substructureNotifyMask
+                                        .|. exposureMask
+                                        .|. structureNotifyMask 
+                                        .|. propertyChangeMask
 
-        sync display False
-        xSetErrorHandler
+            sync display False
+            xSetErrorHandler
 
-        hSetBuffering stdout NoBuffering
+            hSetBuffering stdout NoBuffering
 
-        print $ "ROOT" ++ show rootwin
+            print $ "RootWin: " ++ show rootwin
 
-        grabServer display
-        window_query <- queryTree display rootwin
-        let children = (\(_,_,x) -> x) window_query
-            winlist = [] :: [Win]
-        winlist <- foldM (addWin display) winlist children
-        winlist <- addWin display winlist rootwin
-        ungrabServer display
-        print $ "Winlist: " ++ (show winlist)
+            grabServer display
+            winlist <- do
+                window_query <- queryTree display rootwin
+                maybewins    <- mapM (winFromWindow display) (third window_query)
+                return $ map fromJust $ filter isJust maybewins
+            ungrabServer display
+            print $ "Winlist: " ++ show winlist
 
 
-        allocaXEvent $ \e -> do
-            let mainloop = \wlist evptr -> do
-                    winlist <- eventLoop display wlist damage_ver evptr
-                    mainloop winlist evptr
-            mainloop winlist e
-            
+            allocaXEvent $ \e -> do
+                let mainloop = \wlist evptr -> do
+                        winlist <- eventLoop display wlist damage_ver evptr
+                        mainloop winlist evptr
+                mainloop winlist e
+    
+    where
+        third (_,_,x) = x 
 
 
