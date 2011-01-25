@@ -6,7 +6,7 @@
 --
 -- Maintainer  :  Aren Olson <reacocard@gmail.com>
 -- Stability   :  unstable
--- Portability :  not portable, uses X11, posix
+-- Portability :  not portable, uses X11
 --
 -----------------------------------------------------------------------------
 
@@ -15,7 +15,6 @@ import Data.Bits
 import Data.Maybe
 import Data.List ( find, delete )
 import Control.Monad
-import Foreign.C.Types( CInt )
 import Foreign.Ptr( nullPtr )
 import Foreign.Marshal( alloca )
 import Foreign.Storable( peek )
@@ -34,8 +33,8 @@ data Win = Win {  win_window    :: Window
 
 
 -- translate an EventType to a human-readable name
-evtypeToString :: EventType -> String
-evtypeToString evtype
+evtypeToString :: EventType -> EventType -> String
+evtypeToString evtype damageNotify
     | evtype == createNotify            = "Create"
     | evtype == configureNotify         = "Configure"
     | evtype == destroyNotify           = "Destroy"
@@ -45,6 +44,7 @@ evtypeToString evtype
     | evtype == circulateNotify         = "Circulate"
     | evtype == expose                  = "Expose"
     | evtype == propertyNotify          = "Property"
+    | evtype == damageNotify            = "Damage"
     | otherwise                         = "Unknown (" ++ (show evtype) ++ ")"
 
 -- Find a Win in winlist by its corresponding X window
@@ -75,8 +75,8 @@ winFromWindow display win = alloca $ \wa -> do
                         else do d <- xdamageCreate display win 3; return $ Just d
             return $ Just $ Win {win_window=win, win_damage=damage, win_damaged=False}
 
-eventHandler :: Display -> [Win] -> CInt -> Event -> IO [Win]
-eventHandler display winlist damage_ver ev
+eventHandler :: Display -> [Win] -> EventType -> Event -> IO [Win]
+eventHandler display winlist damageNotify ev
     | evtype == createNotify && isNothing maybewin = do
             window <- winFromWindow display event_win
             if isNothing window 
@@ -87,7 +87,7 @@ eventHandler display winlist damage_ver ev
             when (isJust maybedamage) $ xdamageDestroy display damage
             return $ delWin winlist win
 
-    | evtype == (fromIntegral damage_ver) && isJust maybewin && isJust maybedamage = do
+    | evtype == damageNotify && isJust maybewin && isJust maybedamage = do
             xdamageSubtract display damage nullPtr nullPtr
             return $ updateWin winlist $ win { win_damaged=True }
 
@@ -95,30 +95,32 @@ eventHandler display winlist damage_ver ev
             return winlist
 
     where
-        evtype      = ev_event_type ev
-        event_win   = ev_window ev
-        maybewin    = findWin winlist event_win
-        win         = fromJust maybewin
-        maybedamage = win_damage win
-        damage      = fromJust maybedamage
+        evtype          = ev_event_type ev
+        event_win       = ev_window ev
+        maybewin        = findWin winlist event_win
+        win             = fromJust maybewin
+        maybedamage     = win_damage win
+        damage          = fromJust maybedamage
 
-printEventDebug :: Event -> CInt -> IO ()
-printEventDebug event damage_ver
-    | (evwin /= 176 && evwin /= 62914566) || evtype /= (fromIntegral damage_ver) =
-        print $ (evtypeToString evtype) ++ " event on window " ++ (show evwin)
+printEventDebug :: Event -> EventType -> IO ()
+printEventDebug event damageNotify
+    -- Ignore damage events on the root window and the window running 
+    -- the program to avoid infinite loops
+    | (evwin /= 176 && evwin /= 62914566) || evtype /= damageNotify =
+        print $ (evtypeToString evtype damageNotify) ++ " event on window " ++ (show evwin)
     | otherwise =
         return ()
     where
         evtype  = ev_event_type event
         evwin   = ev_window     event
 
-eventLoop :: Display -> [Win] -> CInt -> XEventPtr -> IO [Win]
-eventLoop display winlist damage_ver e = do
+eventLoop :: Display -> [Win] -> EventType -> XEventPtr -> IO [Win]
+eventLoop display winlist damageNotify e = do
     nextEvent display e
     ev <- getEvent e
-    printEventDebug ev damage_ver
-    eventHandler display winlist damage_ver ev
-
+    printEventDebug ev damageNotify
+    eventHandler display winlist damageNotify ev
+    eventLoop display winlist damageNotify e
 
 main :: IO ()
 main = do
@@ -132,8 +134,7 @@ main = do
             print "A required extension is not available, exiting."
             return ()
         else do
-            let damage_ver = fst $ fromJust damage
-                damage_err = snd $ fromJust damage
+            let damageNotify = fromIntegral $ fst $ fromJust damage :: EventType
 
             selectInput display rootwin  $  substructureNotifyMask
                                         .|. exposureMask
@@ -150,16 +151,13 @@ main = do
                 return $ catMaybes maybewins
             ungrabServer display
 
-            print $ "DamageVer: "   ++ show damage_ver
+            print $ "DamageVer: "   ++ show damageNotify
             print $ "RootWin: "     ++ show rootwin
             print $ "Winlist: "     ++ show winlist
 
-            allocaXEvent $ \e -> do
-                let mainloop = \wlist evptr -> do
-                        winlist <- eventLoop display wlist damage_ver evptr
-                        mainloop winlist evptr
-                mainloop winlist e
-    
+            allocaXEvent $ \e -> do 
+                _ <- eventLoop display winlist damageNotify e
+                return ()
     where
         third (_,_,x) = x 
 
