@@ -11,12 +11,12 @@
 -----------------------------------------------------------------------------
 
 
-import Data.Bits
+import Data.Bits((.|.))
 import Data.Maybe
-import Data.List ( find, delete )
+import Data.List (find, delete)
 import Control.Monad
-import Foreign.Marshal( alloca )
-import Foreign.Storable( peek )
+import Foreign.Marshal(alloca)
+import Foreign.Storable(peek)
 import System.IO
 
 import Graphics.X11.Types
