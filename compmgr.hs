@@ -148,11 +148,14 @@ main = do
     rootwin     <- rootWindow display screen
     damage      <- xdamageQueryExtension display
     composite   <- xcompositeQueryExtension display
-    case (damage, composite) of
-        (Nothing , _        ) -> do print "Damage extension missing."; return ();
-        (_       , Nothing  ) -> do print "Composite extension missing."; return ();
-        (Just dam, Just comp) -> do
-            let damageNotify = fromIntegral $ fst dam :: EventType
+    fixes       <- xfixesQueryExtension display
+    -- TODO: check extension versions
+    case (damage, composite, fixes) of
+        (Nothing , _        , _       ) -> do print "Damage extension missing."; return ();
+        (_       , Nothing  , _       ) -> do print "Composite extension missing."; return ();
+        (_       , _        , Nothing ) -> do print "Fixes extension missing."; return ();
+        (Just (damNotify,_), Just _, Just _) -> do
+            let damageNotify = fromIntegral damNotify :: EventType
 
             selectInput display rootwin  $  substructureNotifyMask
                                         .|. exposureMask
@@ -164,8 +167,8 @@ main = do
 
             grabServer display
             winlist <- do
-                window_query <- queryTree display rootwin
-                maybewins    <- mapM (winFromWindow display) (third window_query)
+                (_,_,winlist) <- queryTree display rootwin
+                maybewins     <- mapM (winFromWindow display) winlist
                 return $ catMaybes maybewins
             ungrabServer display
 
@@ -176,6 +179,3 @@ main = do
             allocaXEvent $ \e -> do 
                 eventLoop display winlist damageNotify e
                 return ()
-    where
-        third (_,_,x) = x 
-
