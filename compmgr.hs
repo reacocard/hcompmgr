@@ -79,7 +79,7 @@ winFromWindow display win = alloca $ \wa -> do
         0 -> return Nothing
         _ -> do
             attrs  <- peek wa
-            damage <- if wa_class attrs /= inputOutput 
+            damage <- if wa_class attrs == inputOnly
                         then return Nothing
                         else do d <- xdamageCreate display win 3
                                 return $ Just d
@@ -98,10 +98,9 @@ eventHandler display winlist damageNotify ev
             return $ delWin winlist win
 
     | evtype == damageNotify && isJust maybewin && isJust maybedamage = do
-            xdamageSubtract display damage none none
             return $ updateWin winlist $ win { win_damaged=True }
 
-    | otherwise = 
+    | otherwise = do
             return winlist
 
     where
@@ -124,12 +123,22 @@ printEventDebug event damageNotify
         evtype  = ev_event_type event
         evwin   = ev_window     event
 
+removeDamage :: Display -> [Win] -> IO [Win]
+removeDamage display winlist = mapM remDamage winlist
+    where
+        remDamage win = if win_damaged win && isJust (win_damage win) 
+            then do
+                xdamageSubtract display (fromJust $ win_damage win) none none
+                return $ win { win_damaged=False }
+            else return win
+
 eventLoop :: Display -> [Win] -> EventType -> XEventPtr -> IO [Win]
 eventLoop display winlist damageNotify e = do
     nextEvent display e
     ev <- getEvent e
     printEventDebug ev damageNotify
-    eventHandler display winlist damageNotify ev
+    winlist <- eventHandler display winlist damageNotify ev
+    winlist <- removeDamage display winlist
     eventLoop display winlist damageNotify e
 
 main :: IO ()
