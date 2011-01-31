@@ -25,21 +25,13 @@ import Graphics.X11.Xlib.Extras
 import Graphics.X11.Xdamage
 import Graphics.X11.Xfixes
 import Graphics.X11.Xcomposite
---import GLX
+import Graphics.X11.GLX
+
+import Common
+import qualified GLXRender as R
 
 
-data Win =  Win { win_window    :: Window
-                , win_damage    :: Maybe Damage
-                , win_damaged   :: Bool
-                , win_pixmap    :: Maybe Pixmap
-                } deriving (Show, Eq)
 
-defaultsWin :: Win
-defaultsWin =   Win { win_window    = -1        -- invalid, must be overridden
-                    , win_damage    = Nothing
-                    , win_damaged   = False
-                    , win_pixmap    = Nothing
-                    }
 
 -- translate an EventType to a human-readable name
 evtypeToString :: EventType -> EventType -> String
@@ -115,7 +107,7 @@ printEventDebug :: Event -> EventType -> IO ()
 printEventDebug event damageNotify
     -- Ignore damage events on the root window and the window running 
     -- the program to avoid infinite loops
-    | (evwin /= 176 && evwin /= 62914566) || evtype /= damageNotify =
+    | (evwin /= 176 && evwin /= 48234502) || evtype /= damageNotify =
         print $ (evtypeToString evtype damageNotify) ++ " event on window " ++ (show evwin)
     | otherwise =
         return ()
@@ -132,14 +124,16 @@ removeDamage display winlist = mapM remDamage winlist
                 return $ win { win_damaged=False }
             else return win
 
-eventLoop :: Display -> [Win] -> EventType -> XEventPtr -> IO [Win]
-eventLoop display winlist damageNotify e = do
+eventLoop :: Display -> Window -> [Win] -> EventType -> XEventPtr -> IO [Win]
+eventLoop display win winlist damageNotify e = do
     nextEvent display e
     ev <- getEvent e
     printEventDebug ev damageNotify
     winlist <- eventHandler display winlist damageNotify ev
     winlist <- removeDamage display winlist
-    eventLoop display winlist damageNotify e
+    R.paintAll display win winlist
+    glXSwapBuffers display win
+    eventLoop display win winlist damageNotify e
 
 main :: IO ()
 main = do
@@ -151,9 +145,9 @@ main = do
     fixes       <- xfixesQueryExtension display
     -- TODO: check extension versions
     case (damage, composite, fixes) of
-        (Nothing , _        , _       ) -> do print "Damage extension missing."; return ();
-        (_       , Nothing  , _       ) -> do print "Composite extension missing."; return ();
-        (_       , _        , Nothing ) -> do print "Fixes extension missing."; return ();
+        (Nothing , _        , _       ) -> do error "Damage extension missing."
+        (_       , Nothing  , _       ) -> do error "Composite extension missing."
+        (_       , _        , Nothing ) -> do error "Fixes extension missing."
         (Just (damNotify,_), Just _, Just _) -> do
             let damageNotify = fromIntegral damNotify :: EventType
 
@@ -176,6 +170,13 @@ main = do
             print $ "RootWin: "     ++ show rootwin
             print $ "Winlist: "     ++ show winlist
 
-            allocaXEvent $ \e -> do 
-                eventLoop display winlist damageNotify e
-                return ()
+            compwin <- xcompositeGetOverlayWindow display rootwin
+            win <- R.createWindow display screen compwin
+            case win of
+                Nothing -> do error "Could not create rendering window"
+                Just win -> do
+                    mapWindow display win
+
+                    allocaXEvent $ \e -> do 
+                        eventLoop display win winlist damageNotify e
+                        return ()
