@@ -17,6 +17,7 @@ import Data.List (find, delete)
 import Control.Monad
 import Foreign.Marshal(alloca)
 import Foreign.Storable(peek)
+import Foreign.C.Types
 import System.IO
 
 import Graphics.X11.Types
@@ -77,8 +78,11 @@ winFromWindow display win = alloca $ \wa -> do
                                 return $ Just d
             return $ Just $ defaultsWin {win_window=win, win_damage=damage}
 
-eventHandler :: Display -> [Win] -> EventType -> Event -> IO [Win]
-eventHandler display winlist damageNotify ev
+eventHandler :: Display -> Window -> [Win] -> EventType -> Event -> IO [Win]
+eventHandler display compwin winlist damageNotify ev
+    | event_win == compwin = do
+            return winlist
+
     | evtype == createNotify && isNothing maybewin = do
             window <- winFromWindow display event_win
             case window of
@@ -88,6 +92,10 @@ eventHandler display winlist damageNotify ev
     | evtype == destroyNotify && isJust maybewin = do
             when (isJust maybedamage) $ xdamageDestroy display damage
             return $ delWin winlist win
+
+    | evtype == unmapNotify && isJust maybewin = do
+            when (isJust $ win_pixmap win) $ freePixmap display $ fromJust $ win_pixmap win
+            return $ updateWin winlist $ win { win_pixmap=Nothing }
 
     | evtype == damageNotify && isJust maybewin && isJust maybedamage = do
             return $ updateWin winlist $ win { win_damaged=True }
@@ -124,16 +132,23 @@ removeDamage display winlist = mapM remDamage winlist
                 return $ win { win_damaged=False }
             else return win
 
-eventLoop :: Display -> Window -> [Win] -> EventType -> XEventPtr -> IO [Win]
-eventLoop display win winlist damageNotify e = do
+eventLoop :: Display -> Window -> R.GLXRenderEngine -> [Win] -> EventType -> XEventPtr -> IO [Win]
+eventLoop display compwin render winlist damageNotify e = do
     nextEvent display e
     ev <- getEvent e
     printEventDebug ev damageNotify
-    winlist <- eventHandler display winlist damageNotify ev
-    winlist <- removeDamage display winlist
-    R.paintAll display win winlist
-    glXSwapBuffers display win
-    eventLoop display win winlist damageNotify e
+    winlist <- eventHandler display compwin winlist damageNotify ev
+    nPend <- pending display
+    winlist <- if nPend /= 0
+                then return winlist
+                else do
+                    grabServer display
+                    sync display False
+                    winlist <- removeDamage display winlist
+                    R.paintAll display render winlist
+                    ungrabServer display
+                    return winlist
+    eventLoop display compwin render winlist damageNotify e
 
 main :: IO ()
 main = do
@@ -164,19 +179,23 @@ main = do
                 (_,_,winlist) <- queryTree display rootwin
                 maybewins     <- mapM (winFromWindow display) winlist
                 return $ catMaybes maybewins
+            xcompositeRedirectSubwindows display rootwin compositeRedirectManual
             ungrabServer display
+
+            compwin <- xcompositeGetOverlayWindow display rootwin
 
             print $ "DamageVer: "   ++ show damageNotify
             print $ "RootWin: "     ++ show rootwin
+            print $ "CompWin: "     ++ show compwin
             print $ "Winlist: "     ++ show winlist
-
-            compwin <- xcompositeGetOverlayWindow display rootwin
-            win <- R.createWindow display screen compwin
-            case win of
-                Nothing -> do error "Could not create rendering window"
-                Just win -> do
-                    mapWindow display win
+            
+        
+            mRender <- R.initRender display screen compwin
+            case mRender of
+                Nothing -> do error "Could not set up rendering backend."
+                Just render -> do
+                    mapWindow display compwin
 
                     allocaXEvent $ \e -> do 
-                        eventLoop display win winlist damageNotify e
+                        eventLoop display compwin render winlist damageNotify e
                         return ()

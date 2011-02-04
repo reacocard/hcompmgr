@@ -11,6 +11,6 @@ cabal-version:          >= 1.2
 
 Executable compmgr
     Main-Is:            compmgr.hs
-    build-depends:	base >= 3 && < 5, X11, X11-xdamage, X11-xcomposite, X11-xfixes, GLX, OpenGL
+    build-depends:	base >= 3 && < 5, X11, X11-xdamage, X11-xcomposite, X11-xfixes, GLX, OpenGL, OpenGLRaw
     ghc-options:        -Wall -fno-warn-unused-do-bind
 
