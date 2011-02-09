@@ -6,7 +6,7 @@ import Data.Word
 import Foreign.Marshal.Alloc(alloca)
 import Foreign.Ptr(nullPtr)
 import Foreign(peek)
-import Data.Maybe(isJust, fromJust)
+import Data.Maybe(isNothing, isJust, fromJust)
 import Control.Monad(filterM)
 
 import qualified Graphics.Rendering.OpenGL.GL as GL
@@ -56,35 +56,44 @@ initRender dpy screen compwin = do
 
 paintAll :: Display -> GLXRenderEngine -> [Win] -> IO [Win]
 paintAll dpy render winlist = do
-    winlist <- mapM (paintWin dpy render) winlist
+    winlist <- mapM (updateWinPixmap dpy) winlist
+    winlist <- mapM (updateWinGLPixmap dpy render) winlist
+    mapM_ (paintWin dpy render) winlist
     -- paintWin dpy render (winlist !! 0)
     GL.flush
     glXSwapBuffers dpy $ glxr_window render
     sync dpy False
     return winlist
 
-paintWin :: Display -> GLXRenderEngine -> Win -> IO Win
-paintWin dpy render win = do
-    win <- case win_glpixmap win of
-        Just _ -> return win
-        Nothing -> do 
-            win <- case win_pixmap win of
-                Just _  -> return win
-                Nothing -> do
-                    wa <- getWindowAttributes dpy (win_window win)
-                    if wa_map_state wa == 0 
-                        then return win
-                        else do
-                            pixmap <- xcompositeNameWindowPixmap dpy window
-                            return $ win { win_pixmap=(Just pixmap) }
-            win <- case win_pixmap win of
-                Nothing -> return win
-                Just pixmap -> do
-                    glPixmap <- glXCreateGLXPixmap dpy xvi pixmap
-                    return $ win { win_glpixmap=(Just glPixmap) }
-            return win
-    case win_glpixmap win of
+updateWinPixmap :: Display -> Win -> IO Win
+updateWinPixmap dpy win = 
+    if isNothing $ (win_glpixmap win) >> (win_pixmap win)
+        then return win
+        else do
+            wa <- getWindowAttributes dpy (win_window win)
+            if wa_map_state wa == 0 
+                then return win
+                else do
+                    pixmap <- xcompositeNameWindowPixmap dpy window
+                    return $ win { win_pixmap=(Just pixmap) }
+    where
+        window  = win_window win
+
+updateWinGLPixmap :: Display -> GLXRenderEngine -> Win -> IO Win
+updateWinGLPixmap dpy render win =
+    case win_pixmap win of
         Nothing -> return win
+        Just pixmap -> do
+            glPixmap <- glXCreateGLXPixmap dpy xvi pixmap
+            return $ win { win_glpixmap=(Just glPixmap) }
+    where
+        xvi     = glxr_visual render        
+
+
+paintWin :: Display -> GLXRenderEngine -> Win -> IO ()
+paintWin dpy render win =
+    case win_glpixmap win of
+        Nothing -> return ()
         Just glPixmap -> do
             GLR.glEnable GLR.gl_TEXTURE_2D
 
@@ -120,10 +129,3 @@ paintWin dpy render win = do
             sync dpy False
 
             -- render texture
-
-            return win
-
-    where
-        window  = win_window win
-        compwin = glxr_window render
-        xvi     = glxr_visual render
