@@ -3,7 +3,9 @@ module GLXRender where
 
 import Data.Bits
 import Data.Word
+import Foreign.Marshal.Alloc(alloca)
 import Foreign.Ptr(nullPtr)
+import Foreign(peek)
 import Data.Maybe(isJust, fromJust)
 import Control.Monad(filterM)
 
@@ -29,7 +31,7 @@ attributes = [
 --             , glxBlueSize              , 1
 --             , glxAlphaSize             , 1
 --             , glxDepthSize             , 24
---             , glxBindToTextureRgbaExt  , 1
+             , glxBindToTextureRgbaExt
              ]
 
 data GLXRenderEngine = GLXRenderEngine { 
@@ -46,7 +48,7 @@ initRender dpy screen compwin = do
         Just vis -> do
             visid <- xviVisualId vis
             print $ "Got visual " ++ (show visid)
-            mCtx <- glXCreateContext dpy vis Nothing True
+            mCtx <- glXCreateContext dpy vis Nothing False
             case mCtx of
                 Nothing  -> do print "no CTX"; return Nothing
                 Just ctx -> do
@@ -83,9 +85,10 @@ paintAll :: Display -> GLXRenderEngine -> [Win] -> IO [Win]
 paintAll dpy render winlist = do
 --    glDrawScene
     winlist <- mapM (paintWin dpy render) winlist
-    --paintWin dpy render (winlist !! 1)
+    -- paintWin dpy render (winlist !! 0)
     GL.flush
     glXSwapBuffers dpy $ glxr_window render
+    sync dpy False
     return winlist
 
 paintWin :: Display -> GLXRenderEngine -> Win -> IO Win
@@ -115,6 +118,13 @@ paintWin dpy render win = do
     case win_glpixmap win of
         Nothing -> return win
         Just glPixmap -> do
+            GLR.glEnable GLR.gl_TEXTURE_2D
+
+            textureid <- alloca $ \n -> do
+                GLR.glGenTextures 1 n
+                peek n
+            GLR.glBindTexture GLR.gl_TEXTURE_2D textureid
+
             -- bind to texture
             glXBindTexImageEXT dpy glPixmap glxFrontLeftExt []
 

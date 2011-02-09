@@ -145,7 +145,7 @@ eventLoop display compwin render winlist damageNotify e = do
                     grabServer display
                     sync display False
                     winlist <- removeDamage display winlist
-                    R.paintAll display render winlist
+                    winlist <- R.paintAll display render winlist
                     ungrabServer display
                     return winlist
     eventLoop display compwin render winlist damageNotify e
