@@ -41,49 +41,21 @@ data GLXRenderEngine = GLXRenderEngine {
 
 initRender :: Display -> ScreenNumber -> Window -> IO (Maybe GLXRenderEngine)
 initRender dpy screen compwin = do
-    rootwin     <- rootWindow dpy screen
     mVis <- glXChooseVisual dpy screen attributes
     case mVis of
         Nothing  -> return Nothing
         Just vis -> do
-            visid <- xviVisualId vis
-            print $ "Got visual " ++ (show visid)
             mCtx <- glXCreateContext dpy vis Nothing False
             case mCtx of
-                Nothing  -> do print "no CTX"; return Nothing
+                Nothing  -> return Nothing
                 Just ctx -> do
-                    print "GOT CTX"
---                  w <- allocaSetWindowAttributes $ \xwa -> do 
---                      visid <- xviVisualId vis
---                      set_background_pixel xwa (blackPixel dpy (defaultScreen dpy))
---                      set_border_pixel xwa (blackPixel dpy (defaultScreen dpy))
---                      colorMap <- createColormap dpy rootwin visid allocNone
---                      set_colormap xwa colorMap
---                      createWindow dpy rootwin 0 0 1024 768 24 inputOutput visid (cWBackPixel .|. cWBorderPixel .|. cWColormap) xwa
                     ok <- glXMakeCurrent dpy compwin ctx
                     if ok then return $ Just $ GLXRenderEngine { glxr_window=compwin, glxr_visual=vis }
                           else return Nothing
 
--- Junk, jsut used so we have some feedback that gl is working
-glDrawScene =
-    do GL.clearColor GL.$= GL.Color4 0 0 0 1
-       bMap <- GL.newMap1 (0.0,1.0) [ GL.Vertex3 (-0.9) 0.0 0.0
-                                    , GL.Vertex3 (-0.5) 3.0 0.0
-                                    , GL.Vertex3 0.5 (-3.0) 0.0
-                                    , GL.Vertex3 0.9 0.0 0.0
-                                    ] :: IO (GL.GLmap1 GL.Vertex3 GL.GLfloat)
-       GL.map1 GL.$= Just bMap
-       GL.loadIdentity
-       GL.clear [ColorBuffer,DepthBuffer]
-       GL.color (GL.Color3 1.0 1.0 1.0 :: GL.Color3 GL.GLfloat)
---       GL.renderPrimitive GL.Points $ mapM_ (\i -> GL.vertex $ GL.Vertex2 i i) ([0.0,0.1.. 1.0] :: [GL.GLfloat])
-       GL.renderPrimitive GL.Points $ mapM_ GL.evalCoord1 ([0.0,0.01 .. 1.0] :: [GL.GLfloat])
-       GL.flush
-
 
 paintAll :: Display -> GLXRenderEngine -> [Win] -> IO [Win]
 paintAll dpy render winlist = do
---    glDrawScene
     winlist <- mapM (paintWin dpy render) winlist
     -- paintWin dpy render (winlist !! 0)
     GL.flush
@@ -93,8 +65,6 @@ paintAll dpy render winlist = do
 
 paintWin :: Display -> GLXRenderEngine -> Win -> IO Win
 paintWin dpy render win = do
-    -- get pixmap (will be elsewhere eventually)
-    --print $ "Painting window " ++ (show window)
     win <- case win_glpixmap win of
         Just _ -> return win
         Nothing -> do 
@@ -106,13 +76,11 @@ paintWin dpy render win = do
                         then return win
                         else do
                             pixmap <- xcompositeNameWindowPixmap dpy window
-                            print $ "Pixmap for " ++ (show window)
                             return $ win { win_pixmap=(Just pixmap) }
             win <- case win_pixmap win of
                 Nothing -> return win
                 Just pixmap -> do
                     glPixmap <- glXCreateGLXPixmap dpy xvi pixmap
-                    print "GOT GL PIXMAP"
                     return $ win { win_glpixmap=(Just glPixmap) }
             return win
     case win_glpixmap win of
