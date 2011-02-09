@@ -67,7 +67,7 @@ paintAll dpy render winlist = do
 
 updateWinPixmap :: Display -> Win -> IO Win
 updateWinPixmap dpy win = 
-    if isNothing $ (win_glpixmap win) >> (win_pixmap win)
+    if isJust $ (win_glpixmap win) >> (win_pixmap win)
         then return win
         else do
             wa <- getWindowAttributes dpy (win_window win)
