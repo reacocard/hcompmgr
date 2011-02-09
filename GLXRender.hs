@@ -1,17 +1,12 @@
 
 module GLXRender where
 
-import Data.Bits
-import Data.Word
 import Foreign.Marshal.Alloc(alloca)
-import Foreign.Ptr(nullPtr)
 import Foreign(peek)
-import Data.Maybe(isNothing, isJust, fromJust)
-import Control.Monad(filterM)
+import Data.Maybe
 
 import qualified Graphics.Rendering.OpenGL.GL as GL
 import qualified Graphics.Rendering.OpenGL.Raw as GLR
-import Graphics.Rendering.OpenGL.GL.Framebuffer
 
 import Graphics.X11.Xlib
 import Graphics.X11.Xlib.Extras
@@ -21,6 +16,7 @@ import Graphics.X11.Xcomposite
 
 import Common
 
+attributes :: [GLXAttribute]
 attributes = [ 
 --               glxConfigCaveat          , glxNone
 --             , glxRenderType            , glxRgbaBit
@@ -56,14 +52,14 @@ initRender dpy screen compwin = do
 
 paintAll :: Display -> GLXRenderEngine -> [Win] -> IO [Win]
 paintAll dpy render winlist = do
-    winlist <- mapM (updateWinPixmap dpy) winlist
-    winlist <- mapM (updateWinGLPixmap dpy render) winlist
-    mapM_ (paintWin dpy render) winlist
+    _winlist <- mapM (updateWinPixmap dpy) winlist
+    _winlist <- mapM (updateWinGLPixmap dpy render) _winlist
+    mapM_ (paintWin dpy render) _winlist
     -- paintWin dpy render (winlist !! 0)
     GL.flush
     glXSwapBuffers dpy $ glxr_window render
     sync dpy False
-    return winlist
+    return _winlist
 
 updateWinPixmap :: Display -> Win -> IO Win
 updateWinPixmap dpy win = 
