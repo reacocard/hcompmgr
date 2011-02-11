@@ -77,11 +77,11 @@ updateWinPixmap dpy win =
 
 updateWinGLPixmap :: Display -> GLXRenderEngine -> Win -> IO Win
 updateWinGLPixmap dpy render win =
-    case win_pixmap win of
-        Nothing -> return win
-        Just pixmap -> do
-            glPixmap <- glXCreateGLXPixmap dpy xvi pixmap
+    if (isNothing $ win_glpixmap win) && (isJust $ win_pixmap win)
+        then do
+            glPixmap <- glXCreateGLXPixmap dpy xvi $ fromJust $ win_pixmap win
             return $ win { win_glpixmap=(Just glPixmap) }
+        else return win
     where
         xvi     = glxr_visual render        
 
