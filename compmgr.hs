@@ -139,6 +139,7 @@ eventLoop display compwin render winlist damageNotify e = do
     printEventDebug ev damageNotify
     winlist <- eventHandler display compwin winlist damageNotify ev
     nPend <- pending display
+    --R.paintAll display render winlist
     winlist <- if nPend /= 0
                 then return winlist
                 else do
@@ -183,10 +184,11 @@ main = do
             ungrabServer display
 
             compwin <- xcompositeGetOverlayWindow display rootwin
+            mapWindow display compwin
 
             print $ "DamageVer: "   ++ show damageNotify
             print $ "RootWin: "     ++ show rootwin
-            print $ "CompWin: "     ++ show compwin
+            --print $ "CompWin: "     ++ show compwin
             print $ "Winlist: "     ++ show winlist
             
         
@@ -194,8 +196,6 @@ main = do
             case mRender of
                 Nothing -> do error "Could not set up rendering backend."
                 Just render -> do
-                    mapWindow display compwin
-
                     allocaXEvent $ \e -> do 
                         eventLoop display compwin render winlist damageNotify e
                         return ()
