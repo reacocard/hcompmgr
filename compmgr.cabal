@@ -1,6 +1,6 @@
 name:		        hcompmgr
 version:	        0.1.1
-license:	        BSD3
+license:	        MIT
 copyright:	        Aren Olson, 2011
 maintainer:	        Aren Olson <reacocard@gmail.com>
 homepage:               <github>
