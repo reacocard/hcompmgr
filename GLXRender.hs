@@ -96,8 +96,8 @@ initRender dpy screen compwin = do
                     ok <- glXMakeCurrent dpy compwin ctx
                     GL.clearColor $= Color4 0 0 0 0
                     GL.texture GL.Texture2D $= GL.Enabled
-                    [textureName] <- GL.genObjectNames  1
-                    GL.textureBinding GL.Texture2D $= Just textureName
+--                    [textureName] <- GL.genObjectNames  1
+--                    GL.textureBinding GL.Texture2D $= Just textureName
                     GL.textureFilter GL.Texture2D $= ((GL.Nearest, Nothing), GL.Nearest)
                     GL.ortho2D (0) 1680 (0) 1050
                     return $ Just $ GLXRenderEngine { glxr_window=compwin, glxr_visual=vis }
@@ -117,8 +117,8 @@ color3f = GL.Color3
 paintAll :: Display -> GLXRenderEngine -> [Win] -> IO [Win]
 paintAll dpy render winlist = do
     print "PAINT"
-    --tfpPaintAll dpy render winlist
-    softwarePaintAll dpy render winlist
+    tfpPaintAll dpy render winlist
+    --softwarePaintAll dpy render winlist
 
 tfpPaintAll dpy render winlist = do 
     GL.clear [GL.ColorBuffer]
@@ -166,9 +166,10 @@ tfpPaintWin dpy render win = do
                 height = (wa_height attrs)
                 xpos = wa_x attrs
                 ypos = 1050 - (wa_y attrs)
-
+            [textureName] <- GL.genObjectNames  1
+            GL.textureBinding GL.Texture2D $= Just textureName
             glXBindTexImageEXT dpy glPixmap glxFrontLeftExt []
-            GL.color $ color3f 1 1 1
+            GL.color $ color3f 1 1 0
             GL.renderPrimitive GL.Quads $ do
                 GL.vertex $ vertex2f (fromIntegral $ xpos,fromIntegral $ ypos-height)
                 GL.texCoord $ texCoord2f (0,0)

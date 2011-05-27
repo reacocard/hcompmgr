@@ -143,6 +143,7 @@ eventLoop display compwin render winlist damageNotify e = do
     winlist <- if nPend /= 0
                 then return winlist
                 else do
+                    sync display False
                     grabServer display
                     sync display False
                     winlist <- removeDamage display winlist
